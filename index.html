@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f1419">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<title>Учёт посещений</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="title">Учёт посещений</div>
+    <div class="status"><span id="netDot" class="dot"></span><span id="pendingTxt"></span></div>
+    <button id="btnMenu" class="icon-btn" aria-label="Меню">⚙</button>
+  </header>
+
+  <!-- Киоск: камера у входа -->
+  <section id="view-kiosk" class="view">
+    <div class="camwrap" id="kioskCam"><video id="kVideo" playsinline muted autoplay></video><canvas id="kCanvas"></canvas></div>
+    <div id="banner" class="banner load">Загрузка…</div>
+    <div class="recent">
+      <div class="recent-h">Сегодня отмечено: <b id="todayCount">0</b></div>
+      <ul id="recentList"></ul>
+    </div>
+  </section>
+
+  <!-- Меню (после PIN) -->
+  <section id="view-menu" class="view hidden">
+    <div class="menu-bar">
+      <button id="btnBack" class="btn">← К камере</button>
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="fighters">Бойцы</button>
+        <button class="tab-btn" data-tab="log">Журнал</button>
+        <button class="tab-btn" data-tab="settings">Настройки</button>
+      </nav>
+    </div>
+
+    <div id="tab-fighters" class="tab">
+      <div class="row">
+        <input id="fSearch" type="search" placeholder="Поиск по имени или группе">
+        <button id="btnRefresh" class="btn primary">Обновить из таблицы</button>
+      </div>
+      <div id="fSummary" class="muted"></div>
+      <ul id="fList" class="list"></ul>
+    </div>
+
+    <div id="tab-log" class="tab hidden">
+      <div class="row">
+        <button id="btnSend" class="btn primary">Отправить в таблицу сейчас</button>
+        <button id="btnCsv" class="btn">Скачать журнал (CSV)</button>
+      </div>
+      <div id="logSummary" class="muted"></div>
+      <ul id="logList" class="list"></ul>
+    </div>
+
+    <div id="tab-settings" class="tab hidden">
+      <label>Адрес скрипта Google (Web app URL)
+        <input id="sUrl" type="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
+      </label>
+      <label>Пароль (TOKEN из скрипта)
+        <input id="sToken" type="text" autocomplete="off">
+      </label>
+      <label>Строгость распознавания: <b id="sThrVal"></b>
+        <input id="sThr" type="range" min="0.35" max="0.65" step="0.01">
+        <span class="hint">Меньше — строже (меньше ошибочных отметок, но чаще «не узнал»). Обычно 0.45–0.55.</span>
+      </label>
+      <label>Минимальный размер лица в кадре: <b id="sMinVal"></b>
+        <input id="sMin" type="range" min="0.08" max="0.30" step="0.01">
+        <span class="hint">Больше — отмечаются только те, кто подошёл поближе.</span>
+      </label>
+      <label>Камера
+        <select id="sFacing"><option value="user">Фронтальная</option><option value="environment">Задняя</option></select>
+      </label>
+      <label>PIN для входа в меню (пусто — без PIN)
+        <input id="sPin" type="text" inputmode="numeric" autocomplete="off">
+      </label>
+      <div class="row">
+        <button id="btnSaveCfg" class="btn primary">Сохранить настройки</button>
+      </div>
+      <hr>
+      <div class="row">
+        <button id="btnBackup" class="btn">Сохранить копию лиц (файл)</button>
+        <button id="btnRestore" class="btn">Загрузить копию лиц</button>
+        <input id="fileRestore" type="file" accept="application/json,.json" class="hidden">
+      </div>
+      <p class="hint">Лица хранятся только в этом телефоне (в виде чисел, не фотографий). Если очистить данные браузера — они пропадут, поэтому сохраните копию.</p>
+    </div>
+  </section>
+
+  <!-- Регистрация лица -->
+  <section id="view-register" class="view hidden">
+    <div class="menu-bar">
+      <button id="rBack" class="btn">← Назад</button>
+      <div id="rName" class="reg-name"></div>
+    </div>
+    <div class="camwrap" id="regCam"><video id="rVideo" playsinline muted autoplay></video><canvas id="rCanvas"></canvas></div>
+    <div id="rHint" class="muted center">Сделайте 5–6 снимков: прямо, чуть влево, чуть вправо, с улыбкой. Одно лицо в кадре, лицо крупно.</div>
+    <div class="row center">
+      <button id="rCapture" class="btn primary big">Снять кадр</button>
+    </div>
+    <div class="center"><b id="rCount">0</b> снимков в этой сессии</div>
+    <div class="row center">
+      <button id="rSave" class="btn primary" disabled>Сохранить</button>
+      <button id="rReset" class="btn">Сбросить снимки</button>
+      <button id="rDelete" class="btn danger">Удалить все лица бойца</button>
+    </div>
+  </section>
+</div>
+<div id="toast" class="toast hidden"></div>
+
+<script src="lib/face-api.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
