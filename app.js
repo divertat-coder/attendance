@@ -421,7 +421,8 @@ function download(filename, text, type) {
 }
 $('#btnCsv').onclick = () => {
   const q = s => '"' + String(s).replace(/"/g, '""') + '"';
-  const rows = ['Дата;Время;Fighter_ID;Имя Фамилия'].concat(log.map(e => [e.date, e.time, e.fid || '', q(e.name)].join(';')));
+  const ru = d => d.split('-').reverse().join('.');
+  const rows = ['Дата;Время;Fighter_ID;Имя Фамилия'].concat(log.map(e => [ru(e.date), e.time, e.fid || '', q(e.name)].join(';')));
   download('journal-' + dateStr() + '.csv', '﻿' + rows.join('\r\n'), 'text/csv');
 };
 
