@@ -1,5 +1,5 @@
 // Service worker: кэширует всё приложение, чтобы оно работало без интернета.
-const CACHE = 'attend-v3';
+const CACHE = 'attend-v5';
 const FILES = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.json',
   'icon-192.png', 'icon-512.png', 'lib/face-api.js',

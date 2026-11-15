@@ -1,4 +1,5 @@
 'use strict';
+const APP_VERSION = '5 (Fighter_ID)';
 /*
   Учёт посещений по лицу.
   Распознавание идёт прямо в телефоне. Лица хранятся только в телефоне (128 чисел на снимок, не фото).
@@ -23,8 +24,8 @@ function lsSet(k, v) {
 
 const DEFAULT_CFG = {url: '', token: '', threshold: 0.5, minFace: 0.14, facing: 'user', pin: ''};
 let cfg = Object.assign({}, DEFAULT_CFG, lsGet(KEYS.cfg, {}));
-let fighters = lsGet(KEYS.fighters, []);   // {name, group, desc:[[128 чисел],...], orphan}
-let log = lsGet(KEYS.log, []);             // {id, name, date, time, sent}
+let fighters = lsGet(KEYS.fighters, []);   // {id (Fighter_ID), name, group, nick, desc:[[128 чисел],...], orphan}
+let log = lsGet(KEYS.log, []);             // {uid, fid (Fighter_ID), name, date, time, sent}
 
 const saveFighters = () => lsSet(KEYS.fighters, fighters);
 const saveLog = () => lsSet(KEYS.log, log);
@@ -48,17 +49,18 @@ function idleBanner() {
 }
 
 /* ---------- индекс лиц для сопоставления ---------- */
-let index = new Map(); // name -> [Float32Array,...]
+let index = new Map(); // Fighter_ID -> [Float32Array,...]
+const fighterById = id => fighters.find(x => x.id === id);
 // Что показывать на экране: ник, если он есть, иначе имя. В таблицу всегда уходит полное имя.
-function labelOf(name) {
-  const f = fighters.find(x => x.name === name);
-  return (f && f.nick) ? f.nick : name;
+function labelOf(id, fallbackName) {
+  const f = fighterById(id);
+  return f ? (f.nick || f.name) : (fallbackName || String(id));
 }
 function rebuildIndex() {
   index = new Map();
   for (const f of fighters) {
     if (f.orphan || !f.desc || !f.desc.length) continue;
-    index.set(f.name, f.desc.map(a => Float32Array.from(a)));
+    index.set(f.id, f.desc.map(a => Float32Array.from(a)));
   }
 }
 function dist(a, b) {
@@ -67,16 +69,16 @@ function dist(a, b) {
   return Math.sqrt(s);
 }
 // Возвращает ближайшего бойца, расстояние и отрыв от второго по близости бойца.
-function matchDescriptor(d, excludeName) {
-  let best = {name: null, dist: 9}, second = 9;
-  for (const [name, arr] of index) {
-    if (name === excludeName) continue;
+function matchDescriptor(d, excludeId) {
+  let best = {id: null, dist: 9}, second = 9;
+  for (const [id, arr] of index) {
+    if (id === excludeId) continue;
     let m = 9;
     for (const s of arr) { const x = dist(d, s); if (x < m) m = x; }
-    if (m < best.dist) { second = best.dist; best = {name, dist: m}; }
+    if (m < best.dist) { second = best.dist; best = {id, dist: m}; }
     else if (m < second) second = m;
   }
-  return {name: best.name, dist: best.dist, margin: second - best.dist};
+  return {id: best.id, dist: best.dist, margin: second - best.dist};
 }
 const MARGIN = 0.04;
 
@@ -138,14 +140,14 @@ function showView(name) {
 }
 
 /* ---------- киоск ---------- */
-const hits = new Map();      // имя -> подряд идущих совпадений
+const hits = new Map();      // Fighter_ID -> подряд идущих совпадений
 let unknownHits = 0;
 let loopRunning = false;
-const doneToday = new Set(); // ключи 'дата|имя': один раз за дату
+const doneToday = new Set(); // ключи 'дата|Fighter_ID': один раз за дату
 
 function rebuildDone() {
   doneToday.clear();
-  for (const e of log) doneToday.add(e.date + '|' + e.name);
+  for (const e of log) if (e.fid) doneToday.add(e.date + '|' + e.fid);
 }
 
 async function kioskLoop() {
@@ -172,12 +174,12 @@ async function kioskTick() {
     const box = d.detection.box;
     if (box.width / vw < cfg.minFace) { items.push({box, color: '#8b98a5'}); continue; }
     const m = matchDescriptor(d.descriptor);
-    if (m.name && m.dist <= cfg.threshold && m.margin >= MARGIN) {
-      seen.add(m.name);
-      const n = (hits.get(m.name) || 0) + 1;
-      hits.set(m.name, n);
+    if (m.id && m.dist <= cfg.threshold && m.margin >= MARGIN) {
+      seen.add(m.id);
+      const n = (hits.get(m.id) || 0) + 1;
+      hits.set(m.id, n);
       items.push({box, color: '#34d399'});
-      if (n >= 2) registerScan(m.name);
+      if (n >= 2) registerScan(m.id);
     } else {
       sawUnknownBig = true;
       items.push({box, color: '#fbbf24'});
@@ -193,18 +195,19 @@ async function kioskTick() {
   drawBoxes(kCanvas, kVideo, items);
 }
 
-function registerScan(name) {
+function registerScan(fid) {
+  const f = fighterById(fid); if (!f) return;
   const d = new Date();
-  const key = dateStr(d) + '|' + name;
+  const key = dateStr(d) + '|' + fid;
   if (doneToday.has(key)) {
     // сегодня уже записан — повторно не пишем, только показываем на экране
-    setBanner(labelOf(name) + ' — уже в списке', 'seen', 2000);
+    setBanner(labelOf(fid) + ' — уже в списке', 'seen', 2000);
     return;
   }
   doneToday.add(key);
-  log.push({id: d.getTime() + '-' + Math.random().toString(36).slice(2, 6), name, date: dateStr(d), time: timeStr(d), sent: false});
+  log.push({uid: d.getTime() + '-' + Math.random().toString(36).slice(2, 6), fid, name: f.name, date: dateStr(d), time: timeStr(d), sent: false});
   saveLog();
-  setBanner('✓ ' + labelOf(name), 'ok', 3500);
+  setBanner('✓ ' + labelOf(fid), 'ok', 3500);
   beep();
   renderRecent();
   updateStatus();
@@ -226,11 +229,11 @@ document.addEventListener('pointerdown', () => { try { if (audioCtx && audioCtx.
 function renderRecent() {
   const today = dateStr();
   const todays = log.filter(e => e.date === today);
-  $('#todayCount').textContent = new Set(todays.map(e => e.name)).size;
+  $('#todayCount').textContent = new Set(todays.map(e => e.fid || e.name)).size;
   const ul = $('#recentList'); ul.innerHTML = '';
   for (const e of todays.slice(-8).reverse()) {
     const li = document.createElement('li');
-    li.innerHTML = `<span class="t">${esc(e.time.slice(0, 5))}</span><span>${esc(labelOf(e.name))}</span>`;
+    li.innerHTML = `<span class="t">${esc(e.time.slice(0, 5))}</span><span>${esc(labelOf(e.fid, e.name))}</span>`;
     ul.appendChild(li);
   }
 }
@@ -252,14 +255,15 @@ async function syncLog(manual = false) {
   sending = true;
   try {
     const r = await fetch(cfg.url, {method: 'POST', body: JSON.stringify({
-      token: cfg.token, scans: pend.map(e => ({name: e.name, date: e.date, time: e.time}))
+      token: cfg.token, scans: pend.map(e => ({fid: e.fid, name: e.name, date: e.date, time: e.time}))
     })});
     const j = await r.json();
     if (!j.ok) throw new Error(j.error === 'bad token' ? 'неверный пароль' : (j.error || 'ошибка сервера'));
-    const ids = new Set(pend.map(e => e.id));
-    for (const e of log) if (ids.has(e.id)) e.sent = true;
+    if (j.bad) throw new Error('сервер не принял записей: ' + j.bad + ' (обновите список бойцов и приложение)');
+    const ids = new Set(pend.map(e => e.uid));
+    for (const e of log) if (ids.has(e.uid)) e.sent = true;
     saveLog();
-    if (manual) toast('Отправлено: ' + pend.length);
+    if (manual) toast(`Отправлено: ${pend.length}. Записано новых: ${j.added === undefined ? '?' : j.added}, уже было: ${j.dup === undefined ? '?' : j.dup}`, 6000);
   } catch (e) {
     if (manual) toast('Не удалось отправить: ' + e.message);
   } finally {
@@ -321,7 +325,7 @@ function renderFighters() {
     const chip = f.orphan ? '<span class="chip bad">нет в таблице</span>'
       : n ? `<span class="chip ok">лицо · ${n}</span>` : '<span class="chip no">нет лица</span>';
     li.innerHTML = `<div class="grow"><div class="nm">${esc(f.name)}${f.nick ? ' · «' + esc(f.nick) + '»' : ''}</div><div class="sub">${esc(f.group || 'без группы')}</div></div>${chip}`;
-    li.onclick = () => openRegister(f.name);
+    li.onclick = () => openRegister(f.id);
     ul.appendChild(li);
   }
 }
@@ -330,15 +334,16 @@ $('#fSearch').oninput = renderFighters;
 $('#btnRefresh').onclick = async () => {
   try {
     const j = await apiGet('fighters');
-    const old = new Map(fighters.map(f => [f.name, f]));
+    const old = new Map(fighters.map(f => [f.id, f]));
     const next = [], seen = new Set();
     for (const f of j.fighters) {
-      const o = old.get(f.name);
-      next.push({name: f.name, group: f.group || '', nick: f.nick || '', desc: o ? (o.desc || []) : [], orphan: false});
-      seen.add(f.name);
+      const id = String(f.id);
+      const o = old.get(id);
+      next.push({id, name: f.name, group: f.group || '', nick: f.nick || '', desc: o ? (o.desc || []) : [], orphan: false});
+      seen.add(id);
     }
     let kept = 0;
-    for (const o of fighters) if (!seen.has(o.name) && o.desc && o.desc.length) { next.push(Object.assign({}, o, {orphan: true})); kept++; }
+    for (const o of fighters) if (o.id && !seen.has(o.id) && o.desc && o.desc.length) { next.push(Object.assign({}, o, {orphan: true})); kept++; }
     fighters = next; saveFighters(); rebuildIndex(); renderFighters();
     toast(`Список обновлён: ${j.fighters.length} бойцов` + (kept ? `; «нет в таблице»: ${kept}` : ''));
   } catch (e) { toast('Не удалось обновить список: ' + e.message, 5000); }
@@ -346,8 +351,8 @@ $('#btnRefresh').onclick = async () => {
 
 /* --- регистрация лица --- */
 let regTarget = null, regSamples = [], regBusy = false;
-function openRegister(name) {
-  regTarget = fighters.find(f => f.name === name); if (!regTarget) return;
+function openRegister(id) {
+  regTarget = fighterById(id); if (!regTarget) return;
   regSamples = [];
   $('#rName').textContent = regTarget.name + (regTarget.group ? ' · ' + regTarget.group : '');
   updateRegUi();
@@ -370,8 +375,8 @@ $('#rCapture').onclick = async () => {
     drawBoxes(rCanvas, rVideo, [{box: d.detection.box, color: '#34d399'}]);
     setTimeout(() => drawBoxes(rCanvas, rVideo, []), 600);
     if (d.detection.box.width / rVideo.videoWidth < 0.2) { toast('Лицо слишком маленькое — подойдите ближе'); return; }
-    const m = matchDescriptor(d.descriptor, regTarget.name);
-    if (m.name && m.dist < 0.42) toast(`Очень похоже на «${m.name}». Проверьте, что выбран нужный боец.`, 5000);
+    const m = matchDescriptor(d.descriptor, regTarget.id);
+    if (m.id && m.dist < 0.42) toast(`Очень похоже на «${labelOf(m.id)}». Проверьте, что выбран нужный боец.`, 5000);
     regSamples.push(Array.from(d.descriptor, x => Math.round(x * 1e4) / 1e4));
     updateRegUi();
     beep();
@@ -416,12 +421,13 @@ function download(filename, text, type) {
 }
 $('#btnCsv').onclick = () => {
   const q = s => '"' + String(s).replace(/"/g, '""') + '"';
-  const rows = ['Дата;Время;Имя Фамилия'].concat(log.map(e => [e.date, e.time, q(e.name)].join(';')));
+  const rows = ['Дата;Время;Fighter_ID;Имя Фамилия'].concat(log.map(e => [e.date, e.time, e.fid || '', q(e.name)].join(';')));
   download('journal-' + dateStr() + '.csv', '﻿' + rows.join('\r\n'), 'text/csv');
 };
 
 /* --- настройки --- */
 function fillSettings() {
+  $('#ver').textContent = 'Версия приложения: ' + APP_VERSION;
   $('#sUrl').value = cfg.url; $('#sToken').value = cfg.token;
   $('#sThr').value = cfg.threshold; $('#sThrVal').textContent = cfg.threshold;
   $('#sMin').value = cfg.minFace; $('#sMinVal').textContent = cfg.minFace;
@@ -443,7 +449,7 @@ $('#btnSaveCfg').onclick = async () => {
 };
 
 $('#btnBackup').onclick = () => {
-  const data = fighters.filter(f => f.desc && f.desc.length).map(f => ({name: f.name, group: f.group, desc: f.desc}));
+  const data = fighters.filter(f => f.desc && f.desc.length).map(f => ({id: f.id, name: f.name, group: f.group, desc: f.desc}));
   download('faces-backup-' + dateStr() + '.json', JSON.stringify({v: 1, fighters: data}), 'application/json');
 };
 $('#btnRestore').onclick = () => $('#fileRestore').click();
@@ -453,15 +459,15 @@ $('#fileRestore').onchange = async e => {
   try {
     const j = JSON.parse(await file.text());
     if (!j || !Array.isArray(j.fighters)) throw new Error('неверный формат файла');
-    const byName = new Map(fighters.map(f => [f.name, f]));
+    const byId = new Map(fighters.map(f => [f.id, f]));
     let n = 0;
     for (const it of j.fighters) {
-      if (!it.name || !Array.isArray(it.desc)) continue;
+      if (!it.id || !it.name || !Array.isArray(it.desc)) continue;
       const desc = it.desc.filter(a => Array.isArray(a) && a.length === 128);
       if (!desc.length) continue;
-      const cur = byName.get(it.name);
+      const cur = byId.get(String(it.id));
       if (cur) { cur.desc = desc; cur.orphan = false; }
-      else fighters.push({name: it.name, group: it.group || '', desc, orphan: true});
+      else fighters.push({id: String(it.id), name: it.name, group: it.group || '', desc, orphan: true});
       n++;
     }
     saveFighters(); rebuildIndex(); renderFighters();
