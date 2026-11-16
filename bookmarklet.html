@@ -20,49 +20,69 @@
   <input id="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></label>
 <label>Пароль (TOKEN)
   <input id="tok" autocomplete="off"></label>
+ <label>Режим
+  <select id="mode" style="width:100%;padding:10px;margin:4px 0 14px;background:#182028;border:1px solid #26313b;color:#e6edf3;border-radius:8px;font-size:16px">
+    <option value="exact">Точно по таблице: поставить галочки пришедшим и снять у отсутствующих (на сайте по умолчанию стоят все)</option>
+    <option value="add">Только ставить галочки (ничего не снимать)</option>
+  </select></label>
 <p><a id="bm" class="bm" href="#">Отметить посещаемость</a>
    <button id="copy">Скопировать код закладки</button></p>
 <ol>
-  <li>Заполните оба поля выше. Кнопка «Отметить посещаемость» станет активной.</li>
+  <li>Заполните оба поля выше и выберите режим. Кнопка «Отметить посещаемость» станет активной.</li>
   <li>Перетащите её на панель закладок Chrome (если панели нет, Ctrl+Shift+B).</li>
   <li>Если перетащить не удалось: создайте закладку вручную (правый клик на панели → «Добавить страницу»), в поле «URL» вставьте скопированный код.</li>
 </ol>
-<p class="hint">Как пользоваться: на сайте откройте «Статистику посещений», выберите группу и дату, нажмите закладку, проверьте галочки и нажмите «Сохранить».</p>
+<p class="hint">Как пользоваться: на сайте откройте «Статистику посещений», выберите группу и дату (дождитесь списка бойцов), нажмите закладку, проверьте галочки и сохраните.</p>
 
 <script>
 // Эта функция превращается в закладку. Здесь нельзя использовать символ процента и комментарии // .
-function tick(SU, TK) {
+function tick(SU, TK, MODE) {
   var norm = function (s) { return String(s || '').replace(/[«»]/g, '').replace(/\s+/g, ' ').trim().toLowerCase(); };
-  var d = '';
-  var labels = document.querySelectorAll('.form_input_name');
-  for (var i = 0; i < labels.length; i++) {
-    if (labels[i].textContent.indexOf('Дата') === 0) {
-      var b = labels[i].nextElementSibling;
-      var m = b && b.textContent.match(/\d{2}\.\d{2}\.\d{4}/);
-      if (m) d = m[0];
+  var RE = /\d{2}\.\d{2}\.\d{4}/;
+  var d = '', inputs = document.querySelectorAll('input'), best = null;
+  for (var i = 0; i < inputs.length; i++) {
+    var v = inputs[i];
+    if (v.type === 'checkbox' || v.type === 'radio' || !/^\s*\d{2}\.\d{2}\.\d{4}\s*$/.test(v.value)) continue;
+    var near = (v.parentNode && v.parentNode.textContent) || '';
+    if (best === null || near.indexOf('Дата') >= 0) best = v;
+  }
+  if (best) d = best.value.trim();
+  if (!d) {
+    var labels = document.querySelectorAll('.form_input_name');
+    for (var j = 0; j < labels.length; j++) {
+      if (labels[j].textContent.indexOf('Дата') === 0) {
+        var bb = labels[j].nextElementSibling, m = bb && bb.textContent.match(RE);
+        if (m) d = m[0];
+      }
     }
   }
   if (!d) { alert('Не нашёл дату на странице. Откройте «Статистику посещений», выберите группу и дату.'); return; }
-  var items = [], trs = document.querySelectorAll('#sportsmensList tr');
+
+  var items = [], trs = document.querySelectorAll('tr');
   for (var k = 0; k < trs.length; k++) {
-    var cb = trs[k].querySelector('input.status[type=checkbox]'), td = trs[k].querySelector('td');
-    if (cb && td) items.push({name: norm(td.textContent), cb: cb, tr: trs[k]});
+    if (trs[k].querySelector('tr')) continue;
+    var cb = trs[k].querySelector('input[type=checkbox]'), td = trs[k].querySelector('td');
+    if (cb && td && norm(td.textContent)) items.push({name: norm(td.textContent), cb: cb, tr: trs[k]});
   }
-  if (!items.length) { alert('Не нашёл на странице список бойцов с галочками.'); return; }
+  if (!items.length) { alert('Не нашёл на странице список бойцов с галочками. Сначала выберите группу и дождитесь списка.'); return; }
 
   function apply(list) {
-    var set = {}, added = 0, already = 0;
+    var set = {}, ticked = 0, unticked = 0, same = 0, inTable = 0;
     list.forEach(function (n) { set[norm(n)] = true; });
+    items.forEach(function (it) { if (set[it.name]) inTable++; });
+    if (!inTable) {
+      alert('Дата: ' + d + '\nСреди бойцов на этой странице (' + items.length + ') нет никого, кто отмечен в таблице за эту дату.\nГалочки не менялись. Возможно, тренировки не было или данные с телефона ещё не отправлены.');
+      return;
+    }
     items.forEach(function (it) {
-      if (!set[it.name]) return;
-      if (it.cb.checked) { already++; return; }
-      it.cb.click();
-      it.tr.style.backgroundColor = '#c8f0c8';
-      added++;
+      var want = !!set[it.name];
+      if (want && !it.cb.checked) { it.cb.click(); it.tr.style.backgroundColor = '#c8f0c8'; ticked++; }
+      else if (!want && it.cb.checked && MODE === 'exact') { it.cb.click(); it.tr.style.backgroundColor = '#f6c8c8'; unticked++; }
+      else same++;
     });
-    alert('Дата: ' + d + '\nОтмечено новых галочек: ' + added + '\nУже были отмечены: ' + already +
-      '\nБойцов на странице: ' + items.length +
-      '\n\nПроверьте список и нажмите «Сохранить». Галочки сняты не были.');
+    alert('Дата: ' + d + '\nБойцов на странице: ' + items.length + '\nПо таблице были: ' + inTable +
+      '\nГалочек поставлено: ' + ticked + (MODE === 'exact' ? '\nГалочек снято (не было по таблице): ' + unticked : '') +
+      '\nБез изменений: ' + same + '\n\nПроверьте список и нажмите кнопку сохранения на сайте.');
   }
 
   function manual(why) {
@@ -80,22 +100,22 @@ function tick(SU, TK) {
     .then(function (r) { return r.json(); })
     .then(function (j) {
       if (!j.ok) throw new Error(j.error === 'bad token' ? 'неверный пароль' : (j.error || 'ошибка'));
-      if (!j.names.length) { alert('В таблице нет отметок за ' + d + '.'); return; }
+      if (!j.names.length) { alert('В таблице нет отметок за ' + d + '. Галочки не менялись.'); return; }
       apply(j.names);
     })
     .catch(function (e) { manual(e.message || e); });
 }
 
-var urlEl = document.getElementById('url'), tokEl = document.getElementById('tok'), bm = document.getElementById('bm');
+var urlEl = document.getElementById('url'), tokEl = document.getElementById('tok'), modeEl = document.getElementById('mode'), bm = document.getElementById('bm');
 function code() {
-  return 'javascript:' + encodeURIComponent('(' + tick.toString() + ')(' + JSON.stringify(urlEl.value.trim()) + ',' + JSON.stringify(tokEl.value.trim()) + ');void 0');
+  return 'javascript:' + encodeURIComponent('(' + tick.toString() + ')(' + JSON.stringify(urlEl.value.trim()) + ',' + JSON.stringify(tokEl.value.trim()) + ',' + JSON.stringify(modeEl.value) + ');void 0');
 }
 function refresh() {
   var ok = urlEl.value.trim() && tokEl.value.trim();
   bm.href = ok ? code() : '#';
   bm.style.opacity = ok ? 1 : .4;
 }
-urlEl.oninput = tokEl.oninput = refresh;
+urlEl.oninput = tokEl.oninput = modeEl.onchange = refresh;
 bm.onclick = function (e) { e.preventDefault(); alert('Перетащите эту кнопку на панель закладок, а не нажимайте её здесь.'); };
 document.getElementById('copy').onclick = function () {
   if (!urlEl.value.trim() || !tokEl.value.trim()) { alert('Сначала заполните оба поля.'); return; }
