@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Закладка для сайта</title>
+<style>
+  body{font:16px/1.5 system-ui,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;background:#0f1419;color:#e6edf3}
+  input{width:100%;padding:10px;margin:4px 0 14px;background:#182028;border:1px solid #26313b;color:#e6edf3;border-radius:8px;font-size:16px;box-sizing:border-box}
+  a.bm{display:inline-block;padding:12px 18px;background:#38bdf8;color:#04202e;font-weight:700;border-radius:10px;text-decoration:none}
+  button{padding:10px 14px;border-radius:8px;border:1px solid #26313b;background:#182028;color:#e6edf3;font-size:15px}
+  .hint{color:#8b98a5;font-size:14px}
+  ol li{margin:6px 0}
+</style>
+</head>
+<body>
+<h2>Закладка «Отметить посещаемость» для сайта jitae.lv</h2>
+<p class="hint">Страница ничего не отправляет: адрес и пароль остаются только в вашей закладке в этом браузере.</p>
+<label>Адрес скрипта Google (…/exec)
+  <input id="url" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></label>
+<label>Пароль (TOKEN)
+  <input id="tok" autocomplete="off"></label>
+<p><a id="bm" class="bm" href="#">Отметить посещаемость</a>
+   <button id="copy">Скопировать код закладки</button></p>
+<ol>
+  <li>Заполните оба поля выше. Кнопка «Отметить посещаемость» станет активной.</li>
+  <li>Перетащите её на панель закладок Chrome (если панели нет, Ctrl+Shift+B).</li>
+  <li>Если перетащить не удалось: создайте закладку вручную (правый клик на панели → «Добавить страницу»), в поле «URL» вставьте скопированный код.</li>
+</ol>
+<p class="hint">Как пользоваться: на сайте откройте «Статистику посещений», выберите группу и дату, нажмите закладку, проверьте галочки и нажмите «Сохранить».</p>
+
+<script>
+// Эта функция превращается в закладку. Здесь нельзя использовать символ процента и комментарии // .
+function tick(SU, TK) {
+  var norm = function (s) { return String(s || '').replace(/[«»]/g, '').replace(/\s+/g, ' ').trim().toLowerCase(); };
+  var d = '';
+  var labels = document.querySelectorAll('.form_input_name');
+  for (var i = 0; i < labels.length; i++) {
+    if (labels[i].textContent.indexOf('Дата') === 0) {
+      var b = labels[i].nextElementSibling;
+      var m = b && b.textContent.match(/\d{2}\.\d{2}\.\d{4}/);
+      if (m) d = m[0];
+    }
+  }
+  if (!d) { alert('Не нашёл дату на странице. Откройте «Статистику посещений», выберите группу и дату.'); return; }
+  var items = [], trs = document.querySelectorAll('#sportsmensList tr');
+  for (var k = 0; k < trs.length; k++) {
+    var cb = trs[k].querySelector('input.status[type=checkbox]'), td = trs[k].querySelector('td');
+    if (cb && td) items.push({name: norm(td.textContent), cb: cb, tr: trs[k]});
+  }
+  if (!items.length) { alert('Не нашёл на странице список бойцов с галочками.'); return; }
+
+  function apply(list) {
+    var set = {}, added = 0, already = 0;
+    list.forEach(function (n) { set[norm(n)] = true; });
+    items.forEach(function (it) {
+      if (!set[it.name]) return;
+      if (it.cb.checked) { already++; return; }
+      it.cb.click();
+      it.tr.style.backgroundColor = '#c8f0c8';
+      added++;
+    });
+    alert('Дата: ' + d + '\nОтмечено новых галочек: ' + added + '\nУже были отмечены: ' + already +
+      '\nБойцов на странице: ' + items.length +
+      '\n\nПроверьте список и нажмите «Сохранить». Галочки сняты не были.');
+  }
+
+  function manual(why) {
+    var o = document.createElement('div');
+    o.style.cssText = 'position:fixed;z-index:99999;left:10%;top:8%;width:80%;background:#fff;color:#000;border:2px solid #333;padding:12px;font:14px sans-serif';
+    o.innerHTML = '<b>Не удалось получить данные из таблицы (' + why + ').</b><br>Вставьте имена тех, кто был, по одному в строке:<br>' +
+      '<textarea style="width:100%;height:260px"></textarea><br><button>Отметить</button> <button>Закрыть</button>';
+    var ta = o.querySelector('textarea'), bt = o.querySelectorAll('button');
+    bt[0].onclick = function () { var l = ta.value.split(/\r?\n/).filter(function (x) { return x.trim(); }); document.body.removeChild(o); apply(l); };
+    bt[1].onclick = function () { document.body.removeChild(o); };
+    document.body.appendChild(o);
+  }
+
+  fetch(SU + '?action=present&date=' + encodeURIComponent(d) + '&token=' + encodeURIComponent(TK))
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j.ok) throw new Error(j.error === 'bad token' ? 'неверный пароль' : (j.error || 'ошибка'));
+      if (!j.names.length) { alert('В таблице нет отметок за ' + d + '.'); return; }
+      apply(j.names);
+    })
+    .catch(function (e) { manual(e.message || e); });
+}
+
+var urlEl = document.getElementById('url'), tokEl = document.getElementById('tok'), bm = document.getElementById('bm');
+function code() {
+  return 'javascript:' + encodeURIComponent('(' + tick.toString() + ')(' + JSON.stringify(urlEl.value.trim()) + ',' + JSON.stringify(tokEl.value.trim()) + ');void 0');
+}
+function refresh() {
+  var ok = urlEl.value.trim() && tokEl.value.trim();
+  bm.href = ok ? code() : '#';
+  bm.style.opacity = ok ? 1 : .4;
+}
+urlEl.oninput = tokEl.oninput = refresh;
+bm.onclick = function (e) { e.preventDefault(); alert('Перетащите эту кнопку на панель закладок, а не нажимайте её здесь.'); };
+document.getElementById('copy').onclick = function () {
+  if (!urlEl.value.trim() || !tokEl.value.trim()) { alert('Сначала заполните оба поля.'); return; }
+  var c = decodeURIComponent(code().slice(11));
+  var t = 'javascript:' + c.replace(/\n/g, ' ');
+  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { alert('Скопировано.'); }, function () { prompt('Скопируйте код:', t); });
+};
+refresh();
+</script>
+</body>
+</html>
