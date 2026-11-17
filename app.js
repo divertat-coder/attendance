@@ -1,8 +1,8 @@
 'use strict';
-const APP_VERSION = '5 (Fighter_ID)';
+const APP_VERSION = '6 (общая база лиц)';
 /*
   Учёт посещений по лицу.
-  Распознавание идёт прямо в телефоне. Лица хранятся только в телефоне (128 чисел на снимок, не фото).
+  Распознавание идёт прямо в телефоне. Лица (128 чисел на снимок, не фото) хранятся в телефоне и синхронизируются через скрипт Google в приватный файл на Drive.
   В Google Таблицу уходят только: имя, дата, время.
 */
 
@@ -24,7 +24,7 @@ function lsSet(k, v) {
 
 const DEFAULT_CFG = {url: '', token: '', threshold: 0.5, minFace: 0.14, facing: 'user', pin: ''};
 let cfg = Object.assign({}, DEFAULT_CFG, lsGet(KEYS.cfg, {}));
-let fighters = lsGet(KEYS.fighters, []);   // {id (Fighter_ID), name, group, nick, desc:[[128 чисел],...], orphan}
+let fighters = lsGet(KEYS.fighters, []);   // {id (Fighter_ID), name, group, nick, desc:[[128 чисел],...], fts (время изменения лиц, мс), dirty, orphan}
 let log = lsGet(KEYS.log, []);             // {uid, fid (Fighter_ID), name, date, time, sent}
 
 const saveFighters = () => lsSet(KEYS.fighters, fighters);
@@ -284,6 +284,48 @@ async function apiGet(action) {
   return j;
 }
 
+/* ---------- общая база лиц ---------- */
+let facesBusy = false;
+/* Двусторонняя синхронизация: берём с сервера более новые лица, отправляем свои изменённые.
+   extra — удалённый «сиротский» боец, которого уже нет в списке (чтобы удаление дошло до сервера). */
+async function syncFaces(extra, force = false) {
+  if (facesBusy || !cfg.url || !cfg.token || !navigator.onLine) return 0;
+  facesBusy = true;
+  let changed = 0;
+  try {
+    const j = await apiGet('faces');
+    const srv = j.faces || {};
+    const push = [];
+    const all = extra ? fighters.concat([extra]) : fighters;
+    for (const f of all) {
+      const s = srv[f.id], lts = f.fts || 0;
+      const hasLocal = f.desc && f.desc.length;
+      if (force && hasLocal) { f.fts = Date.now(); f.dirty = true; }
+      if (!force && s && s.ts > lts) {
+        f.desc = s.desc || []; f.fts = s.ts; f.dirty = false; changed++;
+      } else if (f.dirty || (!s && hasLocal)) {
+        if (!f.fts) f.fts = Date.now();
+        push.push(f);
+      }
+    }
+    if (push.length) {
+      const r = await fetch(cfg.url, {method: 'POST', body: JSON.stringify({
+        token: cfg.token, action: 'save_faces',
+        faces: push.map(f => ({fid: f.id, ts: f.fts, desc: f.desc || []}))
+      })});
+      const pj = await r.json();
+      if (!pj.ok) throw new Error(pj.error === 'bad token' ? 'неверный пароль' : (pj.error || 'ошибка сервера'));
+      for (const f of push) f.dirty = false;
+    }
+    if (changed || push.length) { saveFighters(); rebuildIndex(); if (mode === 'menu') renderFighters(); }
+    return changed + push.length;
+  } catch (e) {
+    console.warn('faces sync:', e.message);
+    if (force) toast('Лица не синхронизированы: ' + e.message, 6000);
+    return 0;
+  } finally { facesBusy = false; }
+}
+
 function pruneLog() {
   const cutoff = dateStr(new Date(Date.now() - 90 * 86400000));
   const before = log.length;
@@ -339,13 +381,14 @@ $('#btnRefresh').onclick = async () => {
     for (const f of j.fighters) {
       const id = String(f.id);
       const o = old.get(id);
-      next.push({id, name: f.name, group: f.group || '', nick: f.nick || '', desc: o ? (o.desc || []) : [], orphan: false});
+      next.push({id, name: f.name, group: f.group || '', nick: f.nick || '', desc: o ? (o.desc || []) : [], fts: o ? (o.fts || 0) : 0, dirty: !!(o && o.dirty), orphan: false});
       seen.add(id);
     }
     let kept = 0;
     for (const o of fighters) if (o.id && !seen.has(o.id) && o.desc && o.desc.length) { next.push(Object.assign({}, o, {orphan: true})); kept++; }
     fighters = next; saveFighters(); rebuildIndex(); renderFighters();
-    toast(`Список обновлён: ${j.fighters.length} бойцов` + (kept ? `; «нет в таблице»: ${kept}` : ''));
+    const fr = await syncFaces();
+    toast(`Список обновлён: ${j.fighters.length} бойцов` + (kept ? `; «нет в таблице»: ${kept}` : '') + (fr ? `; лица: ${fr}` : ''), 5000);
   } catch (e) { toast('Не удалось обновить список: ' + e.message, 5000); }
 };
 
@@ -386,7 +429,8 @@ $('#rCapture').onclick = async () => {
 $('#rReset').onclick = () => { regSamples = []; updateRegUi(); };
 $('#rSave').onclick = () => {
   regTarget.desc = (regTarget.desc || []).concat(regSamples).slice(-12);
-  saveFighters(); rebuildIndex();
+  regTarget.fts = Date.now(); regTarget.dirty = true;
+  saveFighters(); rebuildIndex(); syncFaces();
   toast('Сохранено: ' + regTarget.name);
   regSamples = []; updateRegUi();
   showView('menu'); switchTab('fighters');
@@ -394,8 +438,10 @@ $('#rSave').onclick = () => {
 $('#rDelete').onclick = () => {
   if (!confirm('Удалить все сохранённые лица бойца «' + regTarget.name + '»?')) return;
   regTarget.desc = [];
+  regTarget.fts = Date.now(); regTarget.dirty = true;
+  const delTarget = regTarget;
   if (regTarget.orphan) fighters = fighters.filter(f => f !== regTarget);
-  saveFighters(); rebuildIndex();
+  saveFighters(); rebuildIndex(); syncFaces(delTarget);
   showView('menu'); switchTab('fighters');
 };
 
@@ -453,6 +499,11 @@ $('#btnBackup').onclick = () => {
   const data = fighters.filter(f => f.desc && f.desc.length).map(f => ({id: f.id, name: f.name, group: f.group, desc: f.desc}));
   download('faces-backup-' + dateStr() + '.json', JSON.stringify({v: 1, fighters: data}), 'application/json');
 };
+$('#btnPushFaces').onclick = async () => {
+  if (!confirm('Отправить все лица из этого телефона на сервер? Записи этих бойцов на сервере будут заменены.')) return;
+  const n = await syncFaces(null, true);
+  toast(n ? 'Отправлено на сервер: ' + n : 'Нечего отправлять');
+};
 $('#btnRestore').onclick = () => $('#fileRestore').click();
 $('#fileRestore').onchange = async e => {
   const file = e.target.files[0]; e.target.value = '';
@@ -467,11 +518,11 @@ $('#fileRestore').onchange = async e => {
       const desc = it.desc.filter(a => Array.isArray(a) && a.length === 128);
       if (!desc.length) continue;
       const cur = byId.get(String(it.id));
-      if (cur) { cur.desc = desc; cur.orphan = false; }
-      else fighters.push({id: String(it.id), name: it.name, group: it.group || '', desc, orphan: true});
+      if (cur) { cur.desc = desc; cur.orphan = false; cur.fts = Date.now(); cur.dirty = true; }
+      else fighters.push({id: String(it.id), name: it.name, group: it.group || '', desc, fts: Date.now(), dirty: true, orphan: true});
       n++;
     }
-    saveFighters(); rebuildIndex(); renderFighters();
+    saveFighters(); rebuildIndex(); renderFighters(); syncFaces();
     toast('Загружено бойцов: ' + n);
   } catch (err) { toast('Не удалось загрузить: ' + err.message); }
 };
@@ -492,7 +543,7 @@ document.addEventListener('visibilitychange', async () => {
   if (!cameraAlive()) { try { await startCamera(); } catch (e) { setBanner('Нет доступа к камере', 'bad'); } }
   renderRecent();
 });
-window.addEventListener('online', () => { updateStatus(); syncLog(); });
+window.addEventListener('online', () => { updateStatus(); syncLog(); syncFaces(); });
 window.addEventListener('offline', updateStatus);
 
 /* ---------- старт ---------- */
@@ -507,10 +558,12 @@ window.addEventListener('offline', updateStatus);
     await loadModels();
   } catch (e) { setBanner('Не удалось загрузить модели: ' + e.message, 'bad'); return; }
   rebuildIndex();
+  syncFaces();
   try { await startCamera(); }
   catch (e) { setBanner('Нет доступа к камере: разрешите её в настройках браузера', 'bad'); return; }
   idleBanner();
   kioskLoop();
   setInterval(() => { syncLog(); updateStatus(); renderRecentIfKiosk(); }, 60000);
+  setInterval(() => syncFaces(), 300000);
 })();
 function renderRecentIfKiosk() { if (mode === 'kiosk') renderRecent(); }

@@ -84,9 +84,10 @@
       <div class="row">
         <button id="btnBackup" class="btn">Сохранить копию лиц (файл)</button>
         <button id="btnRestore" class="btn">Загрузить копию лиц</button>
+        <button id="btnPushFaces" class="btn">Отправить лица этого телефона на сервер</button>
         <input id="fileRestore" type="file" accept="application/json,.json" class="hidden">
       </div>
-      <p class="hint">Лица хранятся только в этом телефоне (в виде чисел, не фотографий). Если очистить данные браузера — они пропадут, поэтому сохраните копию.</p>
+      <p class="hint">Лица хранятся как числа (не фотографии) в приватном файле на вашем Google Drive и копируются в каждый телефон. Другие телефоны подхватывают изменения при запуске, раз в 5 минут и по кнопке «Обновить из таблицы». Файловую копию всё равно можно сохранить.</p>
       <p class="hint" id="ver"></p>
     </div>
   </section>
