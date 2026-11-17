@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '6 (общая база лиц)';
+const APP_VERSION = '7 (диагностика iPhone)';
 /*
   Учёт посещений по лицу.
   Распознавание идёт прямо в телефоне. Лица (128 чисел на снимок, не фото) хранятся в телефоне и синхронизируются через скрипт Google в приватный файл на Drive.
@@ -22,7 +22,7 @@ function lsSet(k, v) {
   catch (e) { toast('Не удалось сохранить: память браузера недоступна или заполнена'); return false; }
 }
 
-const DEFAULT_CFG = {url: '', token: '', threshold: 0.5, minFace: 0.14, facing: 'user', pin: ''};
+const DEFAULT_CFG = {url: '', token: '', threshold: 0.5, minFace: 0.14, facing: 'user', pin: '', backend: 'auto'};
 let cfg = Object.assign({}, DEFAULT_CFG, lsGet(KEYS.cfg, {}));
 let fighters = lsGet(KEYS.fighters, []);   // {id (Fighter_ID), name, group, nick, desc:[[128 чисел],...], fts (время изменения лиц, мс), dirty, orphan}
 let log = lsGet(KEYS.log, []);             // {uid, fid (Fighter_ID), name, date, time, sent}
@@ -106,10 +106,21 @@ for (const [v, w] of [[kVideo, '#kioskCam'], [rVideo, '#regCam']]) {
   v.addEventListener('loadedmetadata', () => { if (v.videoWidth) $(w).style.aspectRatio = v.videoWidth + ' / ' + v.videoHeight; });
 }
 
+for (const v of [kVideo, rVideo]) v.addEventListener('click', () => { v.play().catch(() => {}); });
+
 /* ---------- модели ---------- */
 let modelsReady = false;
+async function setBackendSafe() {
+  const tf = faceapi.tf;
+  const order = cfg.backend === 'cpu' ? ['cpu'] : cfg.backend === 'webgl' ? ['webgl', 'cpu'] : ['webgl', 'cpu'];
+  for (const b of order) {
+    try { if (await tf.setBackend(b)) { await tf.ready(); return tf.getBackend(); } } catch (e) { console.warn('backend', b, e); }
+  }
+  await tf.ready();
+  return tf.getBackend();
+}
 async function loadModels() {
-  await faceapi.tf.ready();
+  await setBackendSafe();
   await faceapi.nets.tinyFaceDetector.loadFromUri('models');
   await faceapi.nets.faceLandmark68TinyNet.loadFromUri('models');
   await faceapi.nets.faceRecognitionNet.loadFromUri('models');
@@ -150,12 +161,18 @@ function rebuildDone() {
   for (const e of log) if (e.fid) doneToday.add(e.date + '|' + e.fid);
 }
 
+let lastTickErr = '';
 async function kioskLoop() {
   if (loopRunning) return;
   loopRunning = true;
   while (mode === 'kiosk') {
     const t0 = performance.now();
-    try { await kioskTick(); } catch (e) { console.error(e); await sleep(800); }
+    try { await kioskTick(); lastTickErr = ''; }
+    catch (e) {
+      console.error(e); lastTickErr = String((e && e.message) || e);
+      setBanner('Ошибка распознавания: ' + lastTickErr, 'bad', 4000);
+      await sleep(800);
+    }
     await sleep(Math.max(60, 300 - (performance.now() - t0)));
   }
   drawBoxes(kCanvas, kVideo, []);
@@ -163,7 +180,12 @@ async function kioskLoop() {
 }
 
 async function kioskTick() {
-  if (!modelsReady || !kVideo.videoWidth || kVideo.paused) return;
+  if (!modelsReady) return;
+  if (kVideo.paused || !kVideo.videoWidth) {
+    try { await kVideo.play(); } catch (e) {}
+    if (kVideo.paused) setBanner('Видео не запущено: коснитесь экрана', 'warn', 2000);
+    return;
+  }
   const dets = await detect(kVideo);
   const vw = kVideo.videoWidth;
   const items = [];
@@ -478,20 +500,44 @@ function fillSettings() {
   $('#sUrl').value = cfg.url; $('#sToken').value = cfg.token;
   $('#sThr').value = cfg.threshold; $('#sThrVal').textContent = cfg.threshold;
   $('#sMin').value = cfg.minFace; $('#sMinVal').textContent = cfg.minFace;
-  $('#sFacing').value = cfg.facing; $('#sPin').value = cfg.pin;
+  $('#sFacing').value = cfg.facing; $('#sPin').value = cfg.pin; $('#sBackend').value = cfg.backend;
 }
+$('#btnDiag').onclick = async () => {
+  const out = $('#diagOut');
+  const v = kVideo;
+  const L = [];
+  L.push('Приложение: ' + APP_VERSION);
+  L.push('Браузер: ' + navigator.userAgent);
+  L.push('Режим вычислений: ' + (faceapi.tf.getBackend() || '?') + ' (настройка: ' + cfg.backend + ')');
+  L.push('Модели загружены: ' + modelsReady);
+  L.push('Видео: ' + v.videoWidth + 'x' + v.videoHeight + ', readyState=' + v.readyState + ', paused=' + v.paused + ', камера жива=' + !!cameraAlive());
+  L.push('Последняя ошибка в цикле: ' + (lastTickErr || 'нет'));
+  out.textContent = L.join('\n') + '\nПроверяю…';
+  try {
+    if (v.paused) { try { await v.play(); } catch (e) { L.push('play(): ' + e.message); } }
+    const t0 = performance.now();
+    const dets = await detect(v);
+    const ms = Math.round(performance.now() - t0);
+    L.push('Проверка: лиц найдено ' + dets.length + ', время ' + ms + ' мс');
+    const t1 = performance.now();
+    const raw = await faceapi.detectAllFaces(v, detOpts());
+    L.push('Только детектор: лиц ' + raw.length + (raw[0] ? ', score ' + raw[0].score.toFixed(2) : '') + ', ' + Math.round(performance.now() - t1) + ' мс');
+  } catch (e) { L.push('ОШИБКА: ' + (e && e.message || e)); }
+  out.textContent = L.join('\n');
+};
 $('#sThr').oninput = e => $('#sThrVal').textContent = e.target.value;
 $('#sMin').oninput = e => $('#sMinVal').textContent = e.target.value;
 $('#btnSaveCfg').onclick = async () => {
-  const prevFacing = cfg.facing;
+  const prevFacing = cfg.facing, prevBackend = cfg.backend;
   cfg = {
     url: $('#sUrl').value.trim(), token: $('#sToken').value.trim(),
     threshold: parseFloat($('#sThr').value), minFace: parseFloat($('#sMin').value),
-    facing: $('#sFacing').value, pin: $('#sPin').value.trim()
+    facing: $('#sFacing').value, pin: $('#sPin').value.trim(), backend: $('#sBackend').value
   };
   lsSet(KEYS.cfg, cfg);
   updateStatus();
   if (cfg.facing !== prevFacing) { try { await startCamera(); } catch (e) { toast('Камера: ' + e.message); return; } }
+  if (cfg.backend !== prevBackend) { toast('Режим вычислений изменён: перезапускаю…'); setTimeout(() => location.reload(), 800); return; }
   toast('Настройки сохранены');
 };
 

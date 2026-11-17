@@ -74,6 +74,9 @@
       <label>Камера
         <select id="sFacing"><option value="user">Фронтальная</option><option value="environment">Задняя</option></select>
       </label>
+      <label>Режим вычислений (если на телефоне не находит лица — попробуйте «Процессор»)
+        <select id="sBackend"><option value="auto">Авто (видеокарта, иначе процессор)</option><option value="webgl">Видеокарта (WebGL)</option><option value="cpu">Процессор (медленнее, но надёжнее)</option></select>
+      </label>
       <label>PIN для входа в меню (пусто — без PIN)
         <input id="sPin" type="text" inputmode="numeric" autocomplete="off">
       </label>
@@ -88,6 +91,8 @@
         <input id="fileRestore" type="file" accept="application/json,.json" class="hidden">
       </div>
       <p class="hint">Лица хранятся как числа (не фотографии) в приватном файле на вашем Google Drive и копируются в каждый телефон. Другие телефоны подхватывают изменения при запуске, раз в 5 минут и по кнопке «Обновить из таблицы». Файловую копию всё равно можно сохранить.</p>
+      <div class="row"><button id="btnDiag" class="btn">Проверка распознавания</button></div>
+      <pre id="diagOut" class="hint" style="white-space:pre-wrap;word-break:break-all"></pre>
       <p class="hint" id="ver"></p>
     </div>
   </section>
