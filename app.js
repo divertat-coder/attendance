@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '7 (диагностика iPhone)';
+const APP_VERSION = '8 (баннер имени)';
 /*
   Учёт посещений по лицу.
   Распознавание идёт прямо в телефоне. Лица (128 чисел на снимок, не фото) хранятся в телефоне и синхронизируются через скрипт Google в приватный файл на Drive.
@@ -38,6 +38,8 @@ function toast(msg, ms = 3500) {
 }
 
 let bannerTimer = null;
+const OK_HOLD_MS = 6000;   // сколько секунд держится «✓ Имя» на экране
+let okUntil = 0;
 function setBanner(text, kind, holdMs = 0) {
   const b = $('#banner'); b.textContent = text; b.className = 'banner ' + kind;
   clearTimeout(bannerTimer);
@@ -211,7 +213,7 @@ async function kioskTick() {
 
   if (sawUnknownBig && !seen.size) {
     unknownHits++;
-    if (unknownHits >= 3) setBanner('Не узнаю. Подойдите ближе, смотрите в камеру', 'warn', 2500);
+    if (unknownHits >= 3 && Date.now() > okUntil) setBanner('Не узнаю. Подойдите ближе, смотрите в камеру', 'warn', 2500);
   } else unknownHits = 0;
 
   drawBoxes(kCanvas, kVideo, items);
@@ -222,14 +224,13 @@ function registerScan(fid) {
   const d = new Date();
   const key = dateStr(d) + '|' + fid;
   if (doneToday.has(key)) {
-    // сегодня уже записан — повторно не пишем, только показываем на экране
-    setBanner(labelOf(fid) + ' — уже в списке', 'seen', 2000);
-    return;
+    return; // сегодня уже записан: повторную отметку молча игнорируем
   }
   doneToday.add(key);
   log.push({uid: d.getTime() + '-' + Math.random().toString(36).slice(2, 6), fid, name: f.name, date: dateStr(d), time: timeStr(d), sent: false});
   saveLog();
-  setBanner('✓ ' + labelOf(fid), 'ok', 3500);
+  okUntil = Date.now() + OK_HOLD_MS;
+  setBanner('✓ ' + labelOf(fid), 'ok', OK_HOLD_MS);
   beep();
   renderRecent();
   updateStatus();
