@@ -65,3 +65,8 @@ hr{border:0;border-top:1px solid var(--line);margin:20px 0}
 .reg-name{font-size:18px;font-weight:700;flex:1}
 
 .toast{position:fixed;left:12px;right:12px;bottom:calc(16px + env(safe-area-inset-bottom));max-width:600px;margin:0 auto;background:#223040;border:1px solid var(--accent);padding:12px 14px;border-radius:12px;z-index:10;text-align:center}
+
+.dist{margin:8px 0;padding:10px 12px;border-radius:10px;text-align:center;font-weight:600;font-size:1.05rem;background:#1f2933;color:#9aa5b1}
+.dist.ok{background:#064e3b;color:#6ee7b7}
+.dist.warn{background:#78350f;color:#fcd34d}
+.dist.bad{background:#7f1d1d;color:#fca5a5}

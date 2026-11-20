@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '8 (баннер имени)';
+const APP_VERSION = '9 (подсказка дистанции)';
 /*
   Учёт посещений по лицу.
   Распознавание идёт прямо в телефоне. Лица (128 чисел на снимок, не фото) хранятся в телефоне и синхронизируются через скрипт Google в приватный файл на Drive.
@@ -423,6 +423,38 @@ function openRegister(id) {
   $('#rName').textContent = regTarget.name + (regTarget.group ? ' · ' + regTarget.group : '');
   updateRegUi();
   showView('register');
+  regLoop();
+}
+
+/* Подсказка дистанции при регистрации: размер лица относительно ширины кадра */
+const REG_MIN = 0.20, REG_MAX = 0.42;   // «правильное» расстояние
+let regLoopRunning = false;
+function setDist(text, cls) { const e = $('#rDist'); e.textContent = text; e.className = 'dist ' + cls; }
+async function regLoop() {
+  if (regLoopRunning) return;
+  regLoopRunning = true;
+  while (mode === 'register') {
+    try {
+      if (!modelsReady || !rVideo.videoWidth || rVideo.paused) { setDist('Ожидание камеры…', 'wait'); }
+      else if (!regBusy) {
+        const dets = await faceapi.detectAllFaces(rVideo, detOpts());
+        const vw = rVideo.videoWidth;
+        let color = '#8b98a5';
+        if (!dets.length) setDist('Лицо не найдено', 'wait');
+        else if (dets.length > 1) { setDist('В кадре должен быть один человек', 'bad'); color = '#f87171'; }
+        else {
+          const r = dets[0].box.width / vw;
+          if (r < REG_MIN) { setDist('Подойдите ближе', 'warn'); color = '#fbbf24'; }
+          else if (r > REG_MAX) { setDist('Отойдите немного', 'warn'); color = '#fbbf24'; }
+          else { setDist('Расстояние хорошее — снимайте', 'ok'); color = '#34d399'; }
+        }
+        if (mode === 'register') drawBoxes(rCanvas, rVideo, dets.map(d => ({box: d.box, color})));
+      }
+    } catch (e) { console.warn('regLoop', e); }
+    await sleep(250);
+  }
+  drawBoxes(rCanvas, rVideo, []);
+  regLoopRunning = false;
 }
 function updateRegUi() {
   $('#rCount').textContent = regSamples.length;
